@@ -1,0 +1,29 @@
+---
+name: faster
+description: "Task queue for Claude Code - add commands via voice or keyboard"
+version: 0.1.0
+author: Jordan Partridge
+license: MIT
+
+# Plugin configuration
+configuration:
+  # Path to SQLite database
+  db_path:
+    type: string
+    default: "~/.faster/knowledge.db"
+    description: "Path to task queue database"
+
+  # Refresh interval in seconds
+  refresh_interval:
+    type: float
+    default: 1.0
+    description: "How often to poll for task updates"
+
+# Keybindings
+keybinds:
+  - action: "MessagePlugin"
+    key: "Ctrl i"
+    payload: "toggle_input"
+  - action: "MessagePlugin"
+    key: "Ctrl r"
+    payload: "refresh"
