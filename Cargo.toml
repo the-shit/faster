@@ -56,6 +56,12 @@ nanoid = "0.4"
 [dev-dependencies]
 mockall = "0.13"
 criterion = "0.5"
+tokio-test = "0.4"
+tempfile = "3.13"
+proptest = "1.5"
+rstest = "0.23"
+assert_matches = "1.5"
+serial_test = "3.2"
 
 [profile.release]
 opt-level = 3
