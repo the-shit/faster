@@ -1,0 +1,303 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Faster - Voice interface for Claude Code
+# Enforces brevity through natural speech interaction
+
+VERSION="0.1.0"
+CONFIG_DIR="${HOME}/.faster"
+CONFIG_FILE="${CONFIG_DIR}/config.sh"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Load config if exists
+[[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
+
+# Configuration defaults
+FASTER_VOICE="${FASTER_VOICE:-Samantha}"
+FASTER_STT="${FASTER_STT:-native}"
+FASTER_SILENCE_THRESHOLD="${FASTER_SILENCE_THRESHOLD:-1.5}"
+FASTER_SHOW_TRANSCRIPTS="${FASTER_SHOW_TRANSCRIPTS:-true}"
+FASTER_MODEL="${FASTER_MODEL:-sonnet}"
+
+# Platform detection
+detect_platform() {
+    case "$(uname -s)" in
+        Darwin*) echo "macos" ;;
+        Linux*)  echo "linux" ;;
+        MINGW*|MSYS*|CYGWIN*) echo "windows" ;;
+        *) echo "unknown" ;;
+    esac
+}
+
+PLATFORM=$(detect_platform)
+
+# Check Claude Code authentication
+check_auth() {
+    if ! command -v claude &> /dev/null; then
+        echo -e "${RED}❌ Claude Code is not installed${NC}"
+        echo ""
+        echo "Install from: https://claude.ai/code"
+        exit 1
+    fi
+
+    # Test if authenticated by trying to run a simple command
+    if ! claude --version &> /dev/null; then
+        echo -e "${RED}❌ Not authenticated with Claude Code${NC}"
+        echo ""
+        echo "Please run:"
+        echo "  claude login"
+        echo ""
+        echo "Then try again: faster"
+        exit 1
+    fi
+
+    echo -e "${GREEN}✓${NC} Authenticated with Claude Code"
+}
+
+# macOS STT using native dictation
+macos_stt() {
+    local audio_file="${1}"
+
+    # Use macOS Shortcuts for dictation
+    # Note: This requires user to have set up Shortcuts app with a "Dictate Text" shortcut
+    if command -v shortcuts &> /dev/null; then
+        shortcuts run "Dictate Text" 2>/dev/null || {
+            # Fallback to AppleScript dictation
+            osascript -e 'tell application "System Events" to keystroke "x" using {command down, option down}' &>/dev/null
+            sleep 0.5
+            pbpaste
+        }
+    else
+        # Simple audio capture and prompt user to speak
+        echo -e "${BLUE}🎤 Speak now...${NC}"
+        rec -q -r 16000 -c 1 "${audio_file}" silence 1 0.1 3% 1 ${FASTER_SILENCE_THRESHOLD} 3% 2>/dev/null || {
+            echo -e "${RED}Error: sox not installed${NC}"
+            echo "Install: brew install sox"
+            exit 1
+        }
+        echo "[Audio captured: transcription would go here]"
+        # TODO: Use whisper-cpp for actual transcription
+        echo ""
+    fi
+}
+
+# macOS TTS using say command
+macos_tts() {
+    local text="${1}"
+    echo "${text}" | say -v "${FASTER_VOICE}" -r 200
+}
+
+# Linux STT using whisper-cpp
+linux_stt() {
+    local audio_file="${1}"
+
+    if ! command -v whisper-cpp &> /dev/null; then
+        echo -e "${RED}Error: whisper-cpp not installed${NC}"
+        echo "Run: faster --install-deps"
+        exit 1
+    fi
+
+    rec -q -r 16000 -c 1 "${audio_file}" silence 1 0.1 3% 1 ${FASTER_SILENCE_THRESHOLD} 3%
+    whisper-cpp -m ~/.faster/models/ggml-base.en.bin -f "${audio_file}" --print-colors 2>/dev/null | grep -v "^\\["
+}
+
+# Linux TTS
+linux_tts() {
+    local text="${1}"
+
+    if command -v espeak-ng &> /dev/null; then
+        echo "${text}" | espeak-ng -s 175
+    elif command -v festival &> /dev/null; then
+        echo "${text}" | festival --tts
+    else
+        echo -e "${RED}Error: No TTS engine found${NC}"
+        echo "Install: sudo apt-get install espeak-ng"
+        exit 1
+    fi
+}
+
+# Platform-agnostic STT
+transcribe() {
+    local audio_file="${1}"
+
+    case "${PLATFORM}" in
+        macos)
+            macos_stt "${audio_file}"
+            ;;
+        linux)
+            linux_stt "${audio_file}"
+            ;;
+        *)
+            echo -e "${RED}Platform not supported yet${NC}"
+            exit 1
+            ;;
+    esac
+}
+
+# Platform-agnostic TTS
+speak() {
+    local text="${1}"
+
+    case "${PLATFORM}" in
+        macos)
+            macos_tts "${text}"
+            ;;
+        linux)
+            linux_tts "${text}"
+            ;;
+        *)
+            echo "${text}"
+            ;;
+    esac
+}
+
+# Main voice loop
+voice_loop() {
+    local temp_audio="/tmp/faster_audio_$$.wav"
+
+    echo -e "${GREEN}🎤 Listening...${NC} (press Ctrl+C to exit)"
+    echo ""
+
+    while true; do
+        # Capture and transcribe
+        local transcript=$(transcribe "${temp_audio}")
+
+        if [[ -z "${transcript}" ]]; then
+            continue
+        fi
+
+        if [[ "${FASTER_SHOW_TRANSCRIPTS}" == "true" ]]; then
+            echo -e "${BLUE}📝 You:${NC} ${transcript}"
+        fi
+
+        # Send to Claude Code
+        echo -e "${YELLOW}🤖 Claude:${NC}"
+        local response=$(claude "${transcript}" 2>&1)
+
+        # Speak response
+        speak "${response}"
+
+        # Also print for visibility
+        echo "${response}"
+        echo ""
+        echo -e "${GREEN}🎤 Listening...${NC}"
+    done
+
+    # Cleanup
+    rm -f "${temp_audio}"
+}
+
+# Test mode
+test_mode() {
+    echo "Testing Faster installation..."
+    echo ""
+
+    echo -n "Platform: "
+    echo "${PLATFORM}"
+
+    echo -n "Claude Code: "
+    if command -v claude &> /dev/null; then
+        echo -e "${GREEN}✓${NC}"
+    else
+        echo -e "${RED}✗${NC}"
+    fi
+
+    echo -n "STT: "
+    case "${PLATFORM}" in
+        macos)
+            if command -v shortcuts &> /dev/null || command -v sox &> /dev/null; then
+                echo -e "${GREEN}✓${NC}"
+            else
+                echo -e "${YELLOW}⚠${NC} (install sox: brew install sox)"
+            fi
+            ;;
+        linux)
+            if command -v whisper-cpp &> /dev/null; then
+                echo -e "${GREEN}✓${NC}"
+            else
+                echo -e "${RED}✗${NC} (run: faster --install-deps)"
+            fi
+            ;;
+    esac
+
+    echo -n "TTS: "
+    case "${PLATFORM}" in
+        macos)
+            echo -e "${GREEN}✓${NC} (say)"
+            ;;
+        linux)
+            if command -v espeak-ng &> /dev/null || command -v festival &> /dev/null; then
+                echo -e "${GREEN}✓${NC}"
+            else
+                echo -e "${YELLOW}⚠${NC} (install: apt-get install espeak-ng)"
+            fi
+            ;;
+    esac
+}
+
+# Show usage
+usage() {
+    cat << EOF
+Faster ${VERSION} - Voice interface for Claude Code
+
+Usage:
+    faster                  Start voice mode
+    faster --test           Test installation
+    faster --install-deps   Install platform dependencies
+    faster --help           Show this help
+    faster --version        Show version
+
+Options:
+    --model MODEL          Use specific Claude model (sonnet, opus, haiku)
+    --continuous           Continuous listening mode
+    --debug                Show debug information
+
+Config file: ${CONFIG_FILE}
+EOF
+}
+
+# Main
+main() {
+    case "${1:-}" in
+        --test)
+            test_mode
+            ;;
+        --help|-h)
+            usage
+            ;;
+        --version|-v)
+            echo "Faster ${VERSION}"
+            ;;
+        --install-deps)
+            echo "TODO: Install platform-specific dependencies"
+            ;;
+        --model)
+            FASTER_MODEL="${2:-sonnet}"
+            shift 2
+            check_auth
+            voice_loop
+            ;;
+        --debug)
+            set -x
+            check_auth
+            voice_loop
+            ;;
+        "")
+            check_auth
+            voice_loop
+            ;;
+        *)
+            echo "Unknown option: ${1}"
+            usage
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

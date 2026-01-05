@@ -1,0 +1,73 @@
+[package]
+name = "faster"
+version = "0.1.0"
+edition = "2021"
+authors = ["Jordan Partridge"]
+description = "Voice-driven deterministic intent processor for Claude Code"
+license = "MIT"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.41", features = ["full"] }
+futures = "0.3"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# HTTP client for API calls
+reqwest = { version = "0.12", features = ["json"] }
+
+# Database (SQLite for knowledge)
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-native-tls", "macros"] }
+
+# Local AI inference (TODO: Add when implementing intent processing)
+# llama_cpp_rs = "0.1"
+
+# Audio (macOS native via FFI)
+cpal = "0.15"  # Cross-platform audio I/O
+hound = "3.5"  # WAV encoding/decoding
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+colored = "2.1"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# HashMap with better ergonomics
+indexmap = "2.5"
+
+# System directories
+dirs = "5.0"
+
+# ID generation
+nanoid = "0.4"
+
+[dev-dependencies]
+mockall = "0.13"
+criterion = "0.5"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[[bin]]
+name = "faster"
+path = "src/main.rs"
+
+# TODO: Add benchmarks later
+# [[bench]]
+# name = "intent_processing"
+# harness = false
